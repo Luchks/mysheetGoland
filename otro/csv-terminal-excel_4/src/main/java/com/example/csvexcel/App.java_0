@@ -1,0 +1,25 @@
+package com.example.csvexcel;
+
+public class App {
+    public static void main(String[] args) {
+        Sheet sheet = new Sheet();
+
+        // Agregamos algunas filas de prueba
+        sheet.addRow(new String[]{"1", "2"});
+        sheet.addRow(new String[]{"3", "4"});
+        sheet.addRow(new String[]{"5", "6"});
+
+        // ➕ Aquí agregas la nueva columna
+        sheet.addColumn();
+
+        // 🧠 Aplicamos la fórmula a toda la columna (columna 2 = tercera columna)
+        sheet.fillColumnWithFormula(2, "=A1+B1");
+        // ✅ Mostrar resultados
+        for (String[] row : sheet.getRows()) {
+            for (String cell : row) {
+                System.out.print(cell + "\t");
+            }
+            System.out.println();
+        }
+    }
+}
