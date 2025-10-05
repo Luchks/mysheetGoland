@@ -132,7 +132,7 @@ public class Sheet {
 
         // Si es una fórmula (empieza con =), aplica a toda la columna automáticamente
         if (value.startsWith("=")) {
-            applyFormulaToColumn(col,row, value);
+            applyFormulaToColumn(col, value);
         }
     }
 
@@ -178,6 +178,15 @@ public class Sheet {
     }
 //`````````````````````````````````````````````````````````````````
 
+    public void applyFormulaToColumn(int columnIndex, String formula) {
+        for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+            String replaced = replaceCellReferences(formula, rowIndex);
+            String result = evaluateFormula(replaced);
+            rows.get(rowIndex)[columnIndex] = result;
+        }
+    }
+
+
     private String replaceCellReferences(String formula, int rowIndex) {
         String result = formula;
         String[] row = rows.get(rowIndex);
@@ -185,36 +194,42 @@ public class Sheet {
         for (int colIndex = 0; colIndex < row.length; colIndex++) {
             char colLetter = (char) ('A' + colIndex);
             String cellRef = "" + colLetter + (rowIndex + 1);
-
-            String cellValue = row[colIndex];
-            if (cellValue == null || cellValue.isEmpty()) cellValue = "0";
-
-            result = result.replaceAll(cellRef, cellValue);
+            String cellValue = getCell(rowIndex, colIndex).getValue(); // obtener texto real de la celda
+            result = result.replace(cellRef, cellValue);
         }
 
         return result;
     }
- 
-       
+    
     public String getColumnName(int index) {
         return String.valueOf((char) ('A' + index));
     }
 
+
     private String evaluateFormula(String expr) {
         try {
+            // Limpia el símbolo '=' al inicio
             if (expr.startsWith("=")) expr = expr.substring(1);
-            expr = expr.replaceAll("\\s+", ""); // limpia espacios
 
-            // ✅ Reemplaza todas las referencias antes
-            // (si ya vienen reemplazadas no pasa nada)
-            double result = evalMath(expr);
-            return String.valueOf(result);
+            // Evalúa solo operaciones simples: +, -, *, /
+            // usando el motor JavaScript si existe, o fallback manual
+            ScriptEngineManager mgr = new ScriptEngineManager();
+            ScriptEngine engine = mgr.getEngineByName("graal.js"); // GraalJS (nuevo)
+
+            if (engine != null) {
+                Object result = engine.eval(expr);
+                return result.toString();
+            } else {
+                // Fallback manual (solo + y -)
+                return String.valueOf(simpleEval(expr));
+            }
 
         } catch (Exception e) {
             System.out.println("⚠️ Error evaluando fórmula: " + expr);
-            return "#ERR";
+            return "ERR";
         }
     }
+
     private double simpleEval(String expr) {
         expr = expr.replaceAll("[^0-9+\\-*/.]", ""); // limpia caracteres extraños
         String[] nums = expr.split("[+]");
@@ -383,93 +398,4 @@ public class Sheet {
         }
         return true;
     }
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`````
-
-    // Nuevo applyFormulaToColumn: recibe la fila de origen (sourceRow)
-    public void applyFormulaToColumn(int columnIndex, int sourceRow, String formula) {
-        if (formula == null || !formula.startsWith("=")) return;
-
-        for (int targetRow = 0; targetRow < rows.size(); targetRow++) {
-            try {
-                // 1) Ajusta los números de fila de las referencias según la diferencia de filas
-                String shifted = shiftRowNumbersInFormula(formula, sourceRow, targetRow);
-
-                // 2) Reemplaza referencias por valores (evalúa celdas referenciadas)
-                String replaced = replaceCellReferencesForEvaluation(shifted, targetRow, columnIndex);
-
-                // 3) Evalúa la fórmula resultante (evaluateFormula ya maneja el '=').
-                String result = evaluateFormula(replaced);
-
-                // 4) Guarda el resultado en la columna objetivo
-                // Asegúrate de que la fila tenga suficientes columnas (normalizar si es necesario)
-                String[] rowArr = rows.get(targetRow);
-                if (columnIndex >= rowArr.length) {
-                    String[] newRow = new String[columnIndex + 1];
-                    System.arraycopy(rowArr, 0, newRow, 0, rowArr.length);
-                    for (int k = rowArr.length; k < newRow.length; k++) newRow[k] = "";
-                    rows.set(targetRow, newRow);
-                }
-                rows.get(targetRow)[columnIndex] = result;
-            } catch (Exception e) {
-                rows.get(targetRow)[columnIndex] = "#ERR";
-            }
-        }
-    }
-
-    // Ajusta los números de fila en todas las referencias tipo A1, B12, AA3, etc.
-    // por el delta = targetRow - sourceRow
-    private String shiftRowNumbersInFormula(String formula, int sourceRow, int targetRow) {
-        Matcher m = Pattern.compile("([A-Za-z]+)(\\d+)").matcher(formula);
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String col = m.group(1);
-            int refRow = Integer.parseInt(m.group(2)); // 1-based
-            int newRow = refRow + (targetRow - sourceRow);
-            if (newRow < 1) newRow = 1; // evitar filas < 1
-            m.appendReplacement(sb, col + newRow);
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-
-    // Reemplaza referencias (A2, B3, ...) por el valor evaluado de esa celda.
-    // targetRow = fila donde se está evaluando la fórmula (0-based).
-    // fillingColumn = columna que estamos llenando (usada para evitar circularidad simple).
-    private String replaceCellReferencesForEvaluation(String formula, int targetRow, int fillingColumn) {
-        Matcher m = Pattern.compile("([A-Za-z]+)(\\d+)").matcher(formula);
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String colLetters = m.group(1);
-            int rowNum = Integer.parseInt(m.group(2)); // 1-based
-            int refRowIndex = rowNum - 1;
-            int refColIndex = columnToIndex(colLetters);
-
-            String val = "0";
-            if (refRowIndex >= 0 && refRowIndex < rows.size() && refColIndex >= 0 && refColIndex < getColCount()) {
-                // Evitar referencia circular simple (misma celda que estamos llenando)
-                if (refRowIndex == targetRow && refColIndex == fillingColumn) {
-                    // política simple: tratar como 0 para evitar recursión infinita
-                    val = "0";
-                } else {
-                    // Usamos evaluateCell para permitir referencias anidadas (si la celda referenciada es otra fórmula).
-                    String ev = evaluateCell(refRowIndex, refColIndex);
-                    if (ev == null || ev.isEmpty()) ev = "0";
-                    // Si es numérico lo dejamos tal cual; si no, lo ponemos entre comillas para que JS pueda hacer comparaciones
-                    if (ev.matches("-?\\d+(\\.\\d+)?")) {
-                        val = ev;
-                    } else {
-                        val = "\"" + ev.replace("\"", "\\\"") + "\"";
-                    }
-                }
-            } else {
-                val = "0";
-            }
-
-            m.appendReplacement(sb, Matcher.quoteReplacement(val));
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`````
-
 }
