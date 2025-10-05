@@ -201,7 +201,7 @@ public class Sheet {
         return result;
     }
     
-    private String getColumnName(int index) {
+    public String getColumnName(int index) {
         return String.valueOf((char) ('A' + index));
     }
 
@@ -388,5 +388,14 @@ public class Sheet {
             rows.addAll(originalRows);
             originalRows = null;
         }
+    }
+
+    public boolean isColumnEmpty(int colIndex) {
+        for (String[] row : rows) {
+            if (colIndex < row.length && !row[colIndex].trim().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 }
